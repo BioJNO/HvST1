@@ -1,207 +1,157 @@
-# Make overlapping histograms of BW233 vs Barke 50K iSelect recombination data
-
+# Plot COs in BW233 vs Barke 50K iSelect recombination data
 library(tidyverse)
+library(multcomp)
+library(multcompView)
+library(ggpubr)
+library(cowplot)
 
-one <- read.csv("chr1H.csv")
-two <- read.csv("chr2H.csv")
-three <- read.csv("chr3H.csv")
-four <- read.csv("chr4H.csv")
-five <- read.csv("chr5H.csv")
-six<- read.csv("chr6H.csv")
-seven <- read.csv("chr7H.csv")
-
-zones <- read.csv("zone_coords.csv")
 chr_file <- read.table("morex_v3.txt")
-
-morexv3_50K <- read.csv("SNPpositionsFixed.csv")
-barlex_iselect <- read.csv("iSelectMarker.csv")
-
-colnames(zones)
-zones$chromosome <- gsub("Hv_chr_",
-                         "chr",
-                         zones$seq_id)
-zones$H <- "H"
-
-zones <- unite(zones,
-               "chromosome",
-               chromosome:H,
-               remove = TRUE,
-               sep = "")
-
-colnames(zones)
-zones <- zones[,c(7,6,2,3)]
-
-one_uppers <- subset(zones,
-                     chromosome=="chr1H")
-one_uppers <- one_uppers$seq_upper_coor[1:4]
-
-two_uppers <- subset(zones,
-                     chromosome=="chr2H")
-two_uppers <- two_uppers$seq_upper_coor[1:4]
-
-three_uppers <- subset(zones,
-                       chromosome=="chr3H")
-three_uppers <- three_uppers$seq_upper_coor[1:4]
-
-four_uppers <- subset(zones,
-                      chromosome=="chr4H")
-four_uppers <- four_uppers$seq_upper_coor[1:4]
-
-five_uppers <- subset(zones,
-                      chromosome=="chr5H")
-five_uppers <- five_uppers$seq_upper_coor[1:4]
-
-six_uppers <- subset(zones,
-                     chromosome=="chr6H")
-six_uppers <- six_uppers$seq_upper_coor[1:4]
-
-seven_uppers <- subset(zones,
-                       chromosome=="chr7H")
-seven_uppers <- seven_uppers$seq_upper_coor[1:4]
-
-all <- rbind(one,
-             two,
-             three,
-             four,
-             five,
-             six,
-             seven)
-
-all$marker <- gsub("JHI_Hv50k_2016_",
-                   "JHI-Hv50k-2016-",
-                   all$marker)
-
-all$marker <- gsub("12-",
-                   "12_",
-                   all$marker)
-
-all$marker <- gsub("11-",
-                   "11_",
-                   all$marker)
-
-v1tov3 <- merge(all,
-                morexv3_50K,
-                by="marker")
-
-
-missing_markers <- setdiff(all$marker,
-                           v1tov3$marker)
-
-barlex_iselect_found <- barlex_iselect[barlex_iselect$iSelect.Marker %in% missing_markers,]
-
-missing_markers
-
-colnames(v1tov3)
-
-found <- c("chr1H",
-           24807848,
-           "JHI-Hv50k-2016-16174")
-
-morexv3_50K <- rbind(morexv3_50K,
-                     found)
-
-v1tov3 <- merge(all,
-                morexv3_50K,
-                by="marker")
-
-setdiff(all$marker,
-        v1tov3$marker)
+load("chromosome_CO_counts.Rdata")
 
 chr_stats <- rename(chr_file,
-                    Chromosome_v3 = V1,
+                    chromosome = V1,
                     chr_start = V2,
                     chr_end = V3,
                     centromere = V4)
 
-v1tov3 <- merge(v1tov3,
-                chr_stats, 
-                by ="Chromosome_v3")
+co_count_all <- rbind(chr1H_CO,
+                      chr2H_CO,
+                      chr3H_CO,
+                      chr4H_CO,
+                      chr5H_CO,
+                      chr6H_CO,
+                      chr7H_CO)
 
-v1tov3$Position_v3 <- as.numeric(v1tov3$Position_v3)
+co_count_all <- merge(co_count_all,
+                      chr_stats, 
+                      by ="chromosome")
 
-# write.csv(v1tov3,
-#           "markers_v3_coordinates.csv",
-#           row.names = F)
+colnames(co_count_all)
 
-# create percentage bins
-v1tov3$percent <- (v1tov3$Position_v3/v1tov3$chr_end)*100
+# work out the per chromosome increase
+chr_total <- co_count_all %>% group_by(chromosome) %>%
+  summarise(Hvst1 = sum(aa_total_COs),
+            HvST1 = sum(bb_total_COs))
 
-v1tov3$bin <- cut(as.numeric(v1tov3$percent),
-                  breaks = seq(0,
+chr_total$perc_increase <- (chr_total$Hvst1/chr_total$HvST1)-1
+
+write.csv(chr_total,
+          "chromosome_total_crossovers.csv",
+          row.names = F)
+
+
+# create percentage bins ------------------------------------------------------
+co_count_all$percent <- (co_count_all$position/co_count_all$chr_end)*100
+
+co_count_all$perc_bin <- cut(co_count_all$percent,
+                             breaks = seq(0,
                                100,
                                by = 2),
-                  labels = paste(seq(0,
-                                     98,
-                                     by = 2),
-                                 seq(2,
-                                     100,
-                                     by = 2),
-                                 sep = '-' ))
+                             labels = paste(seq(0,
+                                                98,
+                                                by = 2),
+                                            seq(2,
+                                                100,
+                                                by = 2),
+                                            sep = '-' ))
 
-colnames(v1tov3)
-
+# Plot a summary of recombination in all chromosomes by bin --------------------
 # get per position bin CO number
-bin_total <- v1tov3 %>% group_by(bin) %>%
-  summarise(Barke = sum(pop1_COs),
-            Bw233 = sum(pop2_COs))
+bin_total <- co_count_all %>% group_by(perc_bin) %>%
+  summarise(Hvst1 = sum(aa_total_COs),
+            HvST1 = sum(bb_total_COs))
 
 IBM <- c("#648FFF",
          "#DC267F",
          "#FFB000")
 
+# function to plot every nth x axis label
+every_nth = function(n) {
+  return(function(x) {x[c(TRUE, rep(FALSE, n - 1))]})
+}
+
 colnames(bin_total)
 
-long <- pivot_longer(bin_total,
-                     c(2:3),
-                     names_to = "genotype",
-                     values_to = "Crossovers")
+colors <- c("Hvst1" = IBM[1],
+            "HvST1" = IBM[2])
 
-colnames(long)
+all_chr_WT <- ggplot(bin_total, aes(perc_bin)) +
+           geom_bar(aes(y=HvST1,
+                        fill = "HvST1"),
+                    stat = "identity") +
+           scale_fill_manual(values = colors,
+                             name = "Genotype") +
+           theme(axis.text.x = element_text(angle = 90,
+                                            hjust = 1,
+                                            vjust = 0.5,
+                                            size = 8),
+                 axis.text.y = element_text(size = 8),
+                 axis.title = element_text(size = 8),
+                 legend.position = "bottom",
+                 legend.title = element_text(size = 8),
+                 legend.text = element_text(size = 8,
+                                            face = "italic")) +
+           scale_x_discrete(breaks = every_nth(n = 4)) +
+           ylab("Total Crossovers") +
+           xlab("Genomic positon percentile") +
+  ylim(0,250)
+all_chr_WT
 
-ggplot(long, aes(prcntg, Crossovers,
-                 fill = genotype)) +
-  geom_bar(stat = "identity") +
-  scale_fill_manual(labels = c("Bw233", "Barke"),
-                    values = c(IBM[1], IBM[2])) +
+all_chr_mt <- ggplot(bin_total, aes(perc_bin)) +
+  geom_bar(aes(y=Hvst1,
+               fill = "Hvst1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
   theme(axis.text.x = element_text(angle = 90,
                                    hjust = 1,
-                                   vjust = 0.5)) +
-  ylab("Average Crossovers") +
-  xlab("Genomic position percentile") +
-  theme(legend.position = "bottom")
+                                   vjust = 0.5,
+                                   size = 8),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_text(size = 8),
+        legend.position = "bottom",
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8,
+                                   face = "italic")) +
+  scale_x_discrete(breaks = every_nth(n = 4)) +
+  ylab("Total Crossovers") +
+  xlab("Genomic positon percentile") +
+  ylim(0,250)
+all_chr_mt
 
-ggplot(v1tov3, aes(bin)) +
-  geom_bar(aes(y=pop2_COs),
-           stat = "identity",
-           fill = IBM[2]) +
-  geom_bar(aes(y=pop1_COs),
-           stat = "identity",
-           fill = IBM[1],
-           alpha = 0.6) +
-  theme(axis.text.x = element_text(angle = 90,
-                                   hjust = 1,
-                                   vjust = 0.5)) +
-  ylab("Crossovers") +
-  xlab("Genomic posiiton percentile") +
-  theme(legend.position = "bottom")
+plot_grid(all_chr_WT,
+          all_chr_mt,
+          labels = "auto")
 
-# ggsave("avg_COs_vs_percentile_bp_legend.svg",
-#        width = 183,
-#        units = "mm")
+ggsave("Fig4.png",
+       width = 183,
+       height = 80,
+       units = "mm",
+       dpi = 600)
 
+ggsave("Fig4.svg",
+       width = 183,
+       height = 80,
+       units = "mm")
+
+
+# Plot recombination per chromosome -------------------------------------------
 # get per position bin total CO number per chromosome
-bin_total <- v1tov3 %>% group_by(bin, chromosome) %>%
-  summarise(Barke = sum(pop1_COs),
-            Bw233 = sum(pop2_COs))
+bin_total <- co_count_all %>% group_by(perc_bin, chromosome) %>%
+             summarise(Hvst1 = sum(aa_total_COs),
+                       HvST1 = sum(bb_total_COs))
+
+# tidyr hates this column ID for some reason and simply will not work unless 
+# we change it.
+bin_total$x <- bin_total$perc_bin
+colnames(bin_total)
+bin_total <- bin_total[,-1]
 
 bin_total <- complete(bin_total,
                       chromosome,
-                      bin,
-                      fill = 0)
-colnames(bin_total)
-
-
-
+                      x,
+                      fill = list(Hvst1 = 0,
+                                  HvST1 = 0))
 colnames(bin_total)
 
 long <- pivot_longer(bin_total,
@@ -210,184 +160,359 @@ long <- pivot_longer(bin_total,
                      values_to = "Crossovers")
 
 colnames(long)
-colnames(bin_total)
-colnames(v1tov3)
-levels(long$bin)
 
-# dplyr doesn't like "bin" for some reason (?)
-long$prcntg <- long$bin
-
-long <- long[,-1]
-
-bin_total$percnt <- bin_total$bin
-
-bin_total <- bin_total[,-1]
-
-allbins <- complete(bin_total,
-                    chromosome,
-                    percnt,
-                    fill = list(Barke = 0,
-                                Bw233 = 0))
-
-one_pos <- subset(allbins,
+one_pos <- subset(bin_total,
                   chromosome == "chr1H")
-two_pos <- subset(allbins,
+two_pos <- subset(bin_total,
                   chromosome == "chr2H")
-thr_pos <- subset(allbins,
+thr_pos <- subset(bin_total,
                   chromosome == "chr3H")
-fou_pos <- subset(allbins,
+fou_pos <- subset(bin_total,
                   chromosome == "chr4H")
-fiv_pos <- subset(allbins,
+fiv_pos <- subset(bin_total,
                   chromosome == "chr5H")
-six_pos <- subset(allbins,
+six_pos <- subset(bin_total,
                   chromosome == "chr6H")
-sev_pos <- subset(allbins,
+sev_pos <- subset(bin_total,
                   chromosome == "chr7H")
 
-every_nth = function(n) {
-  return(function(x) {x[c(TRUE, rep(FALSE, n - 1))]})
-}
+one_bin_mt <- ggplot(one_pos, aes(x)) +
+  geom_bar(aes(y=Hvst1,
+               fill = "Hvst1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "none") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+one_bin_mt
+
+one_bin_WT <- ggplot(one_pos, aes(x)) +
+  geom_bar(aes(y=HvST1,
+               fill = "HvST1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "none") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+one_bin_WT
+
+two_bin_mt <- ggplot(two_pos, aes(x)) +
+  geom_bar(aes(y=Hvst1,
+               fill = "Hvst1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "ntwo") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+two_bin_mt
+
+two_bin_WT <- ggplot(two_pos, aes(x)) +
+  geom_bar(aes(y=HvST1,
+               fill = "HvST1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "ntwo") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+two_bin_WT
+
+thr_bin_mt <- ggplot(thr_pos, aes(x)) +
+  geom_bar(aes(y=Hvst1,
+               fill = "Hvst1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "nthree") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+thr_bin_mt
+
+thr_bin_WT <- ggplot(thr_pos, aes(x)) +
+  geom_bar(aes(y=HvST1,
+               fill = "HvST1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "nthree") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+thr_bin_WT
+
+fou_bin_mt <- ggplot(fou_pos, aes(x)) +
+  geom_bar(aes(y=Hvst1,
+               fill = "Hvst1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "nfou") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+fou_bin_mt
+
+fou_bin_WT <- ggplot(fou_pos, aes(x)) +
+  geom_bar(aes(y=HvST1,
+               fill = "HvST1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "nfou") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+fou_bin_WT
+
+fiv_bin_mt <- ggplot(fiv_pos, aes(x)) +
+  geom_bar(aes(y=Hvst1,
+               fill = "Hvst1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "nfiv") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+fiv_bin_mt
+
+fiv_bin_WT <- ggplot(fiv_pos, aes(x)) +
+  geom_bar(aes(y=HvST1,
+               fill = "HvST1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "nfiv") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+fiv_bin_WT
+
+six_bin_mt <- ggplot(six_pos, aes(x)) +
+  geom_bar(aes(y=Hvst1,
+               fill = "Hvst1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "nsix") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+six_bin_mt
+
+six_bin_WT <- ggplot(six_pos, aes(x)) +
+  geom_bar(aes(y=HvST1,
+               fill = "HvST1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "nsix") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+six_bin_WT
 
 
-one_bin <- ggplot(one_pos, aes(percnt)) +
-  geom_bar(aes(y=Bw233),
-           stat = "identity",
-           fill = IBM[2]) +
-  geom_bar(aes(y=Barke),
-           stat = "identity",
-           fill = IBM[1],
-           alpha = 0.6) +
-  theme(axis.text.x = element_text(angle = 90,
-                                   hjust = 1,
-                                   vjust = 0.5)) +
-  scale_x_discrete(breaks = every_nth(n = 5)) +
-  ylab("Crossovers") +
-  xlab("Genomic posiiton percentile") +
-  theme(legend.position = "bottom")
-one_bin
+sev_bin_mt <- ggplot(sev_pos, aes(x)) +
+  geom_bar(aes(y=Hvst1,
+               fill = "Hvst1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "nsev") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+sev_bin_mt
 
-two_bin <- ggplot(two_pos, aes(percnt)) +
-  geom_bar(aes(y=Bw233),
-           stat = "identity",
-           fill = IBM[2]) +
-  geom_bar(aes(y=Barke),
-           stat = "identity",
-           fill = IBM[1],
-           alpha = 0.6) +
-  theme(axis.text.x = element_text(angle = 90,
-                                   hjust = 1,
-                                   vjust = 0.5)) +
-  scale_x_discrete(breaks = every_nth(n = 5)) +
-  ylab("Crossovers") +
-  xlab("Genomic posiiton percentile") +
-  theme(legend.position = "bottom")
-two_bin
-
-thr_bin <- ggplot(thr_pos, aes(percnt)) +
-  geom_bar(aes(y=Bw233),
-           stat = "identity",
-           fill = IBM[2]) +
-  geom_bar(aes(y=Barke),
-           stat = "identity",
-           fill = IBM[1],
-           alpha = 0.6) +
-  theme(axis.text.x = element_text(angle = 90,
-                                   hjust = 1,
-                                   vjust = 0.5)) +
-  scale_x_discrete(breaks = every_nth(n = 5)) +
-  ylab("Crossovers") +
-  xlab("Genomic posiiton percentile") +
-  theme(legend.position = "bottom")
-thr_bin
-
-fou_bin <- ggplot(fou_pos, aes(percnt)) +
-  geom_bar(aes(y=Bw233),
-           stat = "identity",
-           fill = IBM[2]) +
-  geom_bar(aes(y=Barke),
-           stat = "identity",
-           fill = IBM[1],
-           alpha = 0.6) +
-  theme(axis.text.x = element_text(angle = 90,
-                                   hjust = 1,
-                                   vjust = 0.5)) +
-  scale_x_discrete(breaks = every_nth(n = 5)) +
-  ylab("Crossovers") +
-  xlab("Genomic posiiton percentile") +
-  theme(legend.position = "bottom")
-fou_bin
-
-fiv_bin <- ggplot(fiv_pos, aes(percnt)) +
-  geom_bar(aes(y=Bw233),
-           stat = "identity",
-           fill = IBM[2]) +
-  geom_bar(aes(y=Barke),
-           stat = "identity",
-           fill = IBM[1],
-           alpha = 0.6) +
-  theme(axis.text.x = element_text(angle = 90,
-                                   hjust = 1,
-                                   vjust = 0.5)) +
-  scale_x_discrete(breaks = every_nth(n = 5)) +
-  ylab("Crossovers") +
-  xlab("Genomic posiiton percentile") +
-  theme(legend.position = "bottom")
-fiv_bin
-
-six_bin <- ggplot(six_pos, aes(percnt)) +
-  geom_bar(aes(y=Bw233),
-           stat = "identity",
-           fill = IBM[2]) +
-  geom_bar(aes(y=Barke),
-           stat = "identity",
-           fill = IBM[1],
-           alpha = 0.6) +
-  theme(axis.text.x = element_text(angle = 90,
-                                   hjust = 1,
-                                   vjust = 0.5)) +
-  scale_x_discrete(breaks = every_nth(n = 5)) +
-  ylab("Crossovers") +
-  xlab("Genomic posiiton percentile") +
-  theme(legend.position = "bottom")
-six_bin
-
-sev_bin <- ggplot(sev_pos, aes(percnt)) +
-  geom_bar(aes(y=Bw233),
-           stat = "identity",
-           fill = IBM[2]) +
-  geom_bar(aes(y=Barke),
-           stat = "identity",
-           fill = IBM[1],
-           alpha = 0.6) +
-  theme(axis.text.x = element_text(angle = 90,
-                                   hjust = 1,
-                                   vjust = 0.5)) +
-  scale_x_discrete(breaks = every_nth(n = 5)) +
-  ylab("Crossovers") +
-  xlab("Genomic posiiton percentile") +
-  theme(legend.position = "bottom")
-sev_bin
-
-library(cowplot)
+sev_bin_WT <- ggplot(sev_pos, aes(x)) +
+  geom_bar(aes(y=HvST1,
+               fill = "HvST1"),
+           stat = "identity") +
+  scale_fill_manual(values = colors,
+                    name = "Genotype") +
+  theme(axis.text.x = element_text(size = 8,
+                                   angle = 90),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_blank(),
+        legend.position = "nsev") +
+  ylim(0,60) +
+  scale_x_discrete(breaks = every_nth(n = 4))
+sev_bin_WT
 
 long$chromosome <- as.factor(long$chromosome)
 
 chroms <- levels(long$chromosome)
 
-plot_grid(one_bin,
-          two_bin,
-          thr_bin,
-          fou_bin,
-          fiv_bin,
-          six_bin,
-          sev_bin,
+plot_grid(one_bin_WT,
+          one_bin_mt,
+          two_bin_WT,
+          two_bin_mt,
+          thr_bin_WT,
+          thr_bin_mt,
+          fou_bin_WT,
+          fou_bin_mt,
+          fiv_bin_WT,
+          fiv_bin_mt,
+          six_bin_WT,
+          six_bin_mt,
+          sev_bin_WT,
+          sev_bin_mt,
+          nrow = 7,
           ncol = 2,
-          nrow = 4,
-          labels = chroms,
-          label_y = 1)
+          labels = c("chr1H",
+                     "",
+                     "chr2H",
+                     "",
+                     "chr3H",
+                     "",
+                     "chr4H",
+                     "",
+                     "chr5H",
+                     "",
+                     "chr6H",
+                     "",
+                     "chr7H",
+                     ""),
+          label_size = 8)
 
-ggsave("individual_chroms_binned.svg",
-       width = 180,
-       height = 240,
+ggsave("FigS14.svg",
+       width = 183,
+       height = 200,
        units = "mm")
 
+# Box plots each chromosome all individual CO counts
+
+colnames(co_count_all)
+
+# want chromosome totals per individual
+indiv_totals <- pivot_longer(co_count_all,
+             8:197,
+             values_to = "crossovers",
+             names_to = "individuals")
+
+colnames(indiv_totals)
+
+indiv_totals <- indiv_totals[,c(1,13,14)]
+
+
+indiv_grp <- indiv_totals %>% group_by(individuals, chromosome) %>%
+  summarise(COs = sum(crossovers, na.rm = T))
+
+mt_rows <- grep("AA", indiv_grp$individuals)
+mt_rows <- indiv_grp$individuals[mt_rows]
+
+indiv_grp$genotype <- ifelse(indiv_grp$individuals %in% mt_rows,
+                             "Hvst1",
+                             "HvST1")
+
+indiv_grp$chromosome <- as.factor(indiv_grp$chromosome)
+indiv_grp$genotype <- as.factor(indiv_grp$genotype)
+
+# t test of difference between means
+lapply(split(indiv_grp,
+             factor(indiv_grp$chromosome)),
+       function(x)t.test(data=x,
+                         COs ~ genotype, paired=FALSE))
+
+sigdat <- data.frame(x=c(0.875,
+                         1.875,
+                         2.875,
+                         3.875,
+                         4.875,
+                         5.875,
+                         6.875),
+                     xend=c(1.125,
+                            2.125,
+                            3.125,
+                            4.125,
+                            5.125,
+                            6.125,
+                            7.125),
+                     y=c(9,
+                         8.5,
+                         10,
+                         9,
+                         10,
+                         7.5,
+                         11),
+                     annotation=c("***",
+                                  "***",
+                                  "**",
+                                  "***",
+                                  "**",
+                                  "***",
+                                  "***"))
+
+ggplot(indiv_grp, aes(chromosome, COs)) +
+  geom_boxplot(aes(fill = genotype,
+                   colour = genotype),
+               alpha = 0.5) +
+  theme(legend.text = element_text(face = "italic",
+                                   size = 12),
+        axis.title = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        axis.text = element_text(size = 12)) +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  geom_signif(xmin = sigdat$x,
+              xmax = sigdat$xend,
+              y_position = sigdat$y,
+              annotations = sigdat$annotation,
+              tip_length = 0)
+
+ggsave("crossover_boxplot.svg",
+       width = 183,
+       height = 120,
+       units = "mm")
+
+# sanity check sums
+totals <- indiv_grp %>% group_by(genotype, chromosome) %>%
+  summarise(COs = sum(COs, na.rm = T))
